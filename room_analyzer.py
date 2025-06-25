@@ -73,7 +73,7 @@ def analyze_room(room_mask, pixel_to_meter_ratio=1.0):
     centroid = (int(cx), int(cy))
 
     # Aspect ratio and shape
-    aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 1.0
+    aspect_ratio = max(w, h) / min(w, h)
     epsilon = 0.02 * cv2.arcLength(main_contour, True)
     approx = cv2.approxPolyDP(main_contour, epsilon, True)
     if len(approx) <= 4:
@@ -151,13 +151,12 @@ def print_room_summary(rooms_info):
         print(f"  Centroid: {rdata['centroid']}")
 
 
-def process_floor_plan(segmented_image_path, pixel_to_meter_ratio=0.1, visualize=True):
+def process_floor_plan(segmented_image_path, pixel_to_meter_ratio=0.1):
     segmented = cv2.imread(segmented_image_path)
     segmented = cv2.cvtColor(segmented, cv2.COLOR_BGR2RGB)
     rooms_info = extract_room_dimensions(segmented, color_maps, room_types, pixel_to_meter_ratio)
-    if visualize:
-        print_room_summary(rooms_info)
-        visualize_room_analysis(segmented, rooms_info)
+    print_room_summary(rooms_info)
+    visualize_room_analysis(segmented, rooms_info)
     return rooms_info
 
 # Example usage:
@@ -165,4 +164,4 @@ def process_floor_plan(segmented_image_path, pixel_to_meter_ratio=0.1, visualize
 if __name__ == "__main__":
     import os
     segmented_image_path = os.path.join(os.path.dirname(__file__), 'segmented_rooms.png')
-    rooms_data = process_floor_plan(segmented_image_path, pixel_to_meter_ratio=0.1, visualize=True)
+    rooms_data = process_floor_plan(segmented_image_path, pixel_to_meter_ratio=0.1)

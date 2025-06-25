@@ -3,6 +3,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
+import copy
 
 # Check for shapely dependency before other imports
 try:
@@ -33,7 +34,7 @@ def visualize_final_layout(segmented_image, final_layout):
                 # Create a rotated rectangle for the furniture
                 rect = (furniture.position_px, (furniture.width_px, furniture.height_px), furniture.angle)
                 box = cv2.boxPoints(rect)
-                box = np.int0(box)
+                box = np.intp(box)
                 
                 cv2.drawContours(overlay, [box], 0, (255, 255, 255), 2)
                 cv2.putText(overlay, furniture.name, furniture.position_px, cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
@@ -131,7 +132,7 @@ def main():
     # 1. Analyze Rooms in PIXELS first
     print("1. Analyzing floor plan (in pixels)...")
     # Use a ratio of 1.0 so all 'unit' measurements are actually pixel measurements
-    rooms_info = process_floor_plan(segmented_image_path, 1.0, visualize=False)
+    rooms_info = process_floor_plan(segmented_image_path, 1.0)
 
     # 2. Load Furniture Definitions
     print("\n2. Loading furniture definitions...")
@@ -153,9 +154,9 @@ def main():
 
     # 5. Place Furniture
     print("\n5. Placing furniture...")
-    # Create a copy of prototypes for the placer, as it might modify them
-    furniture_for_placer = {k: list(v) for k, v in furniture_prototypes.items()}
-    placer = FurniturePlacer(rooms_info, furniture_for_placer, FURNITURE_ROOM_MAP, pixel_to_meter_ratio)
+    # Create a DEEP copy of prototypes for the placer to safely modify
+    furniture_for_placer = copy.deepcopy(furniture_prototypes)
+    placer = FurniturePlacer(rooms_info, furniture_for_placer, FURNITURE_ROOM_MAP, pixel_to_meter_ratio, debug=True)
     final_layout = placer.place_all()
     print("Furniture placement complete.")
 
