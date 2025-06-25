@@ -21,7 +21,7 @@ except ImportError:
     sys.exit(1)
 
 from room_analyzer import process_floor_plan, print_room_summary
-from furniture_definitions import load_furniture_prototypes, FURNITURE_ROOM_MAP
+from furniture_definitions import load_furniture_prototypes, FURNITURE_ROOM_MAP, ensure_essential_furniture
 from furniture_placer import FurniturePlacer
 
 def visualize_final_layout(segmented_image, final_layout):
@@ -152,12 +152,30 @@ def main():
     rooms_info = update_room_units(rooms_info, pixel_to_meter_ratio)
     print_room_summary(rooms_info) # Print summary again with correct units
 
+    # 4.5 Ensure essential furniture is available for all rooms
+    print("\n4.5 Ensuring essential furniture is available for all rooms...")
+    furniture_prototypes = ensure_essential_furniture(rooms_info, furniture_prototypes)
+    
+    # Count rooms by type for reference
+    room_type_count = {}
+    for room_name, room_data in rooms_info.items():
+        room_type = room_data['type']
+        room_type_count[room_type] = room_type_count.get(room_type, 0) + 1
+    print(f"Room types detected: {room_type_count}")
+
     # 5. Place Furniture
     print("\n5. Placing furniture...")
     # Create a DEEP copy of prototypes for the placer to safely modify
     furniture_for_placer = copy.deepcopy(furniture_prototypes)
-    placer = FurniturePlacer(rooms_info, furniture_for_placer, FURNITURE_ROOM_MAP, pixel_to_meter_ratio, debug=True)
+    
+    placer = FurniturePlacer(rooms_info, furniture_for_placer, FURNITURE_ROOM_MAP, 
+                           pixel_to_meter_ratio, debug=True)
     final_layout = placer.place_all()
+    
+    # Print summary of placed furniture by room
+    print("\nFurniture Placement Summary:")
+    for room_name, furniture_list in final_layout.items():
+        print(f"{room_name}: {len(furniture_list)} pieces - {', '.join(f.name for f in furniture_list)}")
     print("Furniture placement complete.")
 
     # 6. Visualize Results
