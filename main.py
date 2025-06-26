@@ -24,8 +24,8 @@ from room_analyzer import process_floor_plan, print_room_summary
 from furniture_definitions import load_furniture_prototypes, FURNITURE_ROOM_MAP, ensure_essential_furniture
 from furniture_placer import FurniturePlacer
 
-def visualize_final_layout(segmented_image, final_layout):
-    """Visualize the final floor plan with furniture."""
+def visualize_final_layout(segmented_image, final_layout, rooms_info):
+    """Visualize the final floor plan with furniture schematically."""
     overlay = segmented_image.copy()
     
     for room_name, furniture_list in final_layout.items():
@@ -41,7 +41,214 @@ def visualize_final_layout(segmented_image, final_layout):
 
     plt.figure(figsize=(12, 12))
     plt.imshow(overlay)
-    plt.title("Final Floor Plan with Furniture")
+    plt.title("Final Floor Plan with Furniture (Schematic)")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+    
+    # After showing the schematic view, show the view with actual furniture images
+    visualize_with_actual_furniture(segmented_image, final_layout)
+
+def visualize_with_actual_furniture(segmented_image, final_layout):
+    """Visualize the floor plan with actual furniture images from the crops folder."""
+    print("\nGenerating visualization with actual furniture images...")
+    
+    # Create a canvas for the final visualization
+    canvas = segmented_image.copy()
+    
+    # ENHANCEMENT: Add floor coloring similar to ground truth image
+    # Use a light wooden floor color
+    floor_color = (245, 222, 179)  # Light wooden floor color
+    
+    # Create a floor layer under the room colors
+    for y in range(canvas.shape[0]):
+        for x in range(canvas.shape[1]):
+            # Only color non-black pixels (rooms)
+            if not np.array_equal(canvas[y, x], [0, 0, 0]):
+                # Apply a subtle wooden texture by varying color slightly
+                variation = np.random.randint(-10, 10, 3)
+                floor_color_var = np.clip(np.array(floor_color) + variation, 0, 255)
+                # Blend the floor color with existing room color
+                canvas[y, x] = canvas[y, x] * 0.3 + floor_color_var * 0.7
+
+    # Find TV position for orienting sofas
+    tv_position = None
+    for room_name, furniture_list in final_layout.items():
+        if room_name.startswith('living_room'):
+            for f in furniture_list:
+                if 'tv' in f.name.lower() and f.position_px:
+                    tv_position = np.array(f.position_px)
+                    break
+            if tv_position is not None:
+                break
+    
+    # Path to furniture crops folder
+    furniture_path = os.path.join(os.path.dirname(__file__), 'furniture_crops')
+    
+    # Process each piece of furniture
+    for room_name, furniture_list in final_layout.items():
+        for furniture in furniture_list:
+            if not furniture.position_px:
+                continue
+            
+            # Load and prepare the furniture image
+            # Find the matching image file based on original filename
+            image_file = os.path.join(furniture_path, furniture.original_filename)
+            if not os.path.exists(image_file):
+                print(f"Warning: Image file not found for {furniture.name}: {image_file}")
+                continue
+            
+            # Load furniture image
+            furniture_img = cv2.imread(image_file, cv2.IMREAD_UNCHANGED)
+            if furniture_img is None:
+                print(f"Warning: Failed to load image for {furniture.name}: {image_file}")
+                continue
+            
+            # Convert BGR to RGB if needed
+            if len(furniture_img.shape) >= 3 and furniture_img.shape[2] == 3:
+                furniture_img = cv2.cvtColor(furniture_img, cv2.COLOR_BGR2RGB)
+            
+            # IMPORTANT: Get the target shape from furniture dimensions
+            target_width = furniture.width_px
+            target_height = furniture.height_px
+            
+            # Determine whether to rotate/flip the image instead of resizing
+            img_h, img_w = furniture_img.shape[:2]
+            img_aspect = img_w / img_h
+            target_aspect = target_width / target_height
+            
+            # If the aspect ratios are flipped, rotate the image 90 degrees
+            # This preserves detail instead of stretching/squashing the image
+            should_rotate = (img_aspect > 1 and target_aspect < 1) or (img_aspect < 1 and target_aspect > 1)
+            
+            if should_rotate:
+                furniture_img = cv2.rotate(furniture_img, cv2.ROTATE_90_CLOCKWISE)
+                img_h, img_w = furniture_img.shape[:2]
+            
+            # CRITICAL CHANGE: Special handling for sofas in living room
+            angle_to_use = furniture.angle
+            if ('sofa' in furniture.name.lower() and tv_position is not None and 
+                furniture.position_px is not None and room_name.startswith('living_room')):
+                
+                # Use the existing furniture angle which should align with the room
+                # The sofa placement algorithm already handles this
+                pass
+            
+            # Scale the image to match target size while preserving aspect ratio
+            scale_factor = min(target_width / img_w, target_height / img_h)
+            new_w = int(img_w * scale_factor)
+            new_h = int(img_h * scale_factor)
+            
+            try:
+                resized_img = cv2.resize(furniture_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            except cv2.error:
+                print(f"Warning: Error resizing image for {furniture.name}. Skipping.")
+                continue
+            
+            # Create a blank image of the target size with transparent background
+            if len(resized_img.shape) >= 3 and resized_img.shape[2] == 4:
+                # With alpha channel
+                padded_img = np.zeros((int(target_height), int(target_width), 4), dtype=np.uint8)
+            else:
+                # Without alpha channel
+                padded_img = np.zeros((int(target_height), int(target_width), 3), dtype=np.uint8)
+            
+            # Center the resized image in the target-sized canvas
+            y_offset = (int(target_height) - new_h) // 2
+            x_offset = (int(target_width) - new_w) // 2
+            
+            # Place the resized image in the center of the padded canvas
+            if y_offset >= 0 and x_offset >= 0 and y_offset + new_h <= padded_img.shape[0] and x_offset + new_w <= padded_img.shape[1]:
+                padded_img[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized_img
+            else:
+                # Handle edge case where offsets would be negative
+                print(f"Warning: Could not pad image for {furniture.name}. Using resized image directly.")
+                padded_img = resized_img
+            
+            # Now rotate the padded image by the furniture angle
+            # OpenCV rotation is counterclockwise, so we negate the angle
+            rotation_angle = -angle_to_use  # Use the potentially adjusted angle for sofas
+            center = (padded_img.shape[1] // 2, padded_img.shape[0] // 2)
+            
+            M = cv2.getRotationMatrix2D(center, rotation_angle, 1.0)
+            
+            # Determine new bounding dimensions after rotation
+            cos = np.abs(M[0, 0])
+            sin = np.abs(M[0, 1])
+            new_w = int((padded_img.shape[0] * sin) + (padded_img.shape[1] * cos))
+            new_h = int((padded_img.shape[0] * cos) + (padded_img.shape[1] * sin))
+            
+            # Adjust transformation matrix to center the result
+            M[0, 2] += (new_w / 2) - center[0]
+            M[1, 2] += (new_h / 2) - center[1]
+            
+            # Perform the rotation
+            try:
+                rotated_img = cv2.warpAffine(padded_img, M, (new_w, new_h), flags=cv2.INTER_LINEAR)
+            except cv2.error:
+                print(f"Warning: Error rotating image for {furniture.name}. Skipping.")
+                continue
+            
+            # Calculate position to place the rotated furniture image
+            x_pos = int(furniture.position_px[0] - (new_w / 2))
+            y_pos = int(furniture.position_px[1] - (new_h / 2))
+            
+            # Make sure position is within canvas bounds
+            if x_pos < 0 or y_pos < 0 or x_pos + new_w > canvas.shape[1] or y_pos + new_h > canvas.shape[0]:
+                print(f"Warning: {furniture.name} extends outside the canvas boundaries.")
+                # Try to adjust position to fit within bounds while maintaining center alignment
+                x_pos = max(0, min(x_pos, canvas.shape[1] - new_w))
+                y_pos = max(0, min(y_pos, canvas.shape[0] - new_h))
+                if x_pos + new_w > canvas.shape[1] or y_pos + new_h > canvas.shape[0]:
+                    # If still out of bounds after adjustment, skip
+                    continue
+                
+            # If the image has an alpha channel, use it for blending
+            if len(rotated_img.shape) >= 3 and rotated_img.shape[2] == 4:
+                # Extract RGB and alpha channels
+                rgb_img = rotated_img[:, :, :3]
+                alpha = rotated_img[:, :, 3] / 255.0
+                
+                # Get the region of interest in the canvas
+                try:
+                    roi = canvas[y_pos:y_pos+new_h, x_pos:x_pos+new_w]
+                    
+                    # Check dimensions match
+                    if roi.shape[:2] != rgb_img.shape[:2]:
+                        print(f"Warning: Dimension mismatch for {furniture.name}. Skipping.")
+                        continue
+                    
+                    # Blend using the alpha channel
+                    for c in range(0, 3):
+                        roi[:, :, c] = roi[:, :, c] * (1 - alpha) + rgb_img[:, :, c] * alpha
+                    
+                    # Update the canvas with the blended ROI
+                    canvas[y_pos:y_pos+new_h, x_pos:x_pos+new_w] = roi
+                except ValueError:
+                    print(f"Warning: ROI error for {furniture.name}. Skipping.")
+                    continue
+            else:
+                # Simple overlay without alpha blending
+                # Ensure ROI doesn't exceed image dimensions
+                # Ensure ROI doesn't exceed image dimensions
+                y_end = min(y_pos + new_h, canvas.shape[0])
+                x_end = min(x_pos + new_w, canvas.shape[1])
+                h_to_use = y_end - y_pos
+                w_to_use = x_end - x_pos
+                
+                if h_to_use <= 0 or w_to_use <= 0:
+                    continue
+                
+                try:
+                    canvas[y_pos:y_end, x_pos:x_end] = rotated_img[:h_to_use, :w_to_use]
+                except ValueError:
+                    print(f"Warning: Dimension mismatch for {furniture.name}. Skipping.")
+                    continue
+    
+    # Display the visualization
+    plt.figure(figsize=(12, 12))
+    plt.imshow(canvas)
+    plt.title("Final Floor Plan with Actual Furniture")
     plt.axis('off')
     plt.tight_layout()
     plt.show()
@@ -182,7 +389,7 @@ def main():
     print("\n6. Visualizing final layout...")
     segmented_image = cv2.imread(segmented_image_path)
     segmented_image = cv2.cvtColor(segmented_image, cv2.COLOR_BGR2RGB)
-    visualize_final_layout(segmented_image, final_layout)
+    visualize_final_layout(segmented_image, final_layout, rooms_info)  # Pass rooms_info here
 
 if __name__ == "__main__":
     main()

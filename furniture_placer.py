@@ -447,36 +447,95 @@ class FurniturePlacer:
                 placed_in_this_room.append(tv)
                 placed_polygons.append(tv_poly)
 
-        # 4. Place main Sofa, additional sofas, and coffee table
+        # 4. Place main Sofa, additional sofas, and coffee table - IMPROVED VERSION
         if sofas and tv in placed_in_this_room:
+            # Get room orientation from walls
+            walls = self._get_walls(room_data['bounding_box'])
+            wall_angles = []
+            for wall in walls:
+                wall_vec = wall[1] - wall[0]
+                angle = np.rad2deg(np.arctan2(wall_vec[1], wall_vec[0])) % 180  # Normalize to 0-180
+                wall_angles.append(angle)
+            
+            # Find dominant room angles (wall orientations)
+            main_angles = []
+            for angle in wall_angles:
+                main_angles.append(angle)
+                main_angles.append((angle + 90) % 180)  # Perpendicular angle
+            
             # Take largest sofa as main sofa
             main_sofa = sofas.pop(0)
             tv_pos = np.array(tv.position_px)
             centroid = np.array(room_polygon.centroid.coords[0])
+            
+            # Calculate direction from TV to room center
             viewing_normal = (centroid - tv_pos) / np.linalg.norm(centroid - tv_pos) if np.linalg.norm(centroid - tv_pos) > 0 else np.array([0,1])
             
-            viewing_dist = (main_sofa.height_px / 2) + 100 # 100px buffer
+            # Distance from TV for sofa placement
+            viewing_dist = (main_sofa.height_px / 2) + 120  # 120px buffer for better spacing
             sofa_pos = tv_pos + viewing_normal * viewing_dist
             
-            is_placed, sofa_poly = self._place_item_at_pos(main_sofa, sofa_pos, tv.angle + 180, room_polygon, placed_polygons)
-            if is_placed:
-                if self.debug: print("Placed main sofa in front of TV.")
-                placed_in_this_room.append(main_sofa)
-                placed_polygons.append(sofa_poly)
+            # Try to align sofa with room orientation first, but also facing the TV
+            placed_sofa = False
+            
+            # Try placing with room's dominant angles first
+            for base_angle in main_angles:
+                # Adjust sofa dimensions to match orientation
+                is_placed, sofa_poly = self._place_item_at_pos(
+                    main_sofa, sofa_pos, base_angle, room_polygon, placed_polygons)
                 
-                # Place coffee table between TV and sofa
-                if tables:
-                    coffee_table = tables.pop(0)
-                    table_pos = tv_pos + viewing_normal * (viewing_dist / 2)
-                    is_placed, table_poly = self._place_item_at_pos(coffee_table, table_pos, tv.angle, room_polygon, placed_polygons)
+                if is_placed:
+                    if self.debug: print(f"Placed main sofa aligned with room at angle {base_angle:.1f}°")
+                    placed_in_this_room.append(main_sofa)
+                    placed_polygons.append(sofa_poly)
+                    placed_sofa = True
+                    break
+            
+            # If room alignment failed, try TV-facing orientation
+            if not placed_sofa:
+                sofa_tv_angle = np.rad2deg(np.arctan2(tv_pos[1] - sofa_pos[1], tv_pos[0] - sofa_pos[0]))
+                is_placed, sofa_poly = self._place_item_at_pos(
+                    main_sofa, sofa_pos, sofa_tv_angle, room_polygon, placed_polygons)
+                
+                if is_placed:
+                    if self.debug: print("Placed main sofa facing directly toward TV.")
+                    placed_in_this_room.append(main_sofa)
+                    placed_polygons.append(sofa_poly)
+                    placed_sofa = True
+            
+            # If we placed the main sofa, try to place a coffee table in front
+            if placed_sofa and tables:
+                coffee_table = tables.pop(0)
+                
+                # Position coffee table directly between TV and sofa
+                table_pos = tv_pos + viewing_normal * (viewing_dist * 0.4)  # 40% of the way from TV to sofa
+                
+                # Try placing the coffee table with room orientation
+                placed_table = False
+                for base_angle in main_angles:
+                    is_placed, table_poly = self._place_item_at_pos(
+                        coffee_table, table_pos, base_angle, room_polygon, placed_polygons)
+                    
                     if is_placed:
-                        if self.debug: print("Placed coffee table.")
+                        if self.debug: print(f"Placed coffee table in front of sofa, aligned with room.")
+                        placed_in_this_room.append(coffee_table)
+                        placed_polygons.append(table_poly)
+                        placed_table = True
+                        break
+                
+                # If aligning with room failed, try placing with TV orientation
+                if not placed_table:
+                    is_placed, table_poly = self._place_item_at_pos(
+                        coffee_table, table_pos, tv.angle, room_polygon, placed_polygons)
+                    
+                    if is_placed:
+                        if self.debug: print("Placed coffee table between TV and sofa.")
                         placed_in_this_room.append(coffee_table)
                         placed_polygons.append(table_poly)
                     else:
-                        tables.insert(0, coffee_table) # Put it back if it didn't fit
-        
-        # 5. Place dining table in center space
+                        tables.insert(0, coffee_table)  # Put it back if it didn't fit
+
+        # 5. Place dining table and other furniture
         if dining_tables:
             dining_table = dining_tables.pop(0)
             

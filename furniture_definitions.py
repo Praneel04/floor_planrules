@@ -48,10 +48,10 @@ ESSENTIAL_FURNITURE = {
 # Mapping of which furniture types belong in which rooms.
 # You can customize these rules.
 FURNITURE_ROOM_MAP = {
-    "living_room": ["Lsofa", "sofa", "tv", "table", "diningtable", "kitchen", "stove", "sink", "chair"],
-    "bedroom_master": ["bed", "bedside", "study", "chair"],
-    "bedroom_guest": ["singlebed", "bedside", "study"],
-    "bedroom": ["singlebed", "bedside", "study"], # Fallback for single bedrooms
+    "living_room": ["Lsofa", "sofa", "tv", "table", "diningtable", "kitchen", "stove", "sink"], # Removed chair
+    "bedroom_master": ["bed", "bedside", "study", "table"], # Removed chair
+    "bedroom_guest": ["singlebed", "bedside", "study", "table"], # Removed chair
+    "bedroom": ["singlebed", "bedside", "study", "table"], # Removed chair, added table
     "bathroom": ["bathtub", "shower", "sink", "commode"],
     "hallway": [],
     "empty_room": [],
